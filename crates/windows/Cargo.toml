@@ -1,0 +1,24 @@
+[package]
+name = "crownos-window-layer"
+description = "The compositor as the agent daemon sees it: windows, focus, placement, input injection, agent cursors and per-window screenshots over Wayland"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+crownos-computer-use-protocol = { workspace = true }
+crownos-protocols = { workspace = true }
+crownos-ui-elements = { workspace = true }
+png = { workspace = true }
+rustix = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+tracing = { workspace = true }
+wayland-client = { workspace = true }
+wayland-protocols = { workspace = true }
+
+[lints]
+workspace = true

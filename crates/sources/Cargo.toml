@@ -1,0 +1,28 @@
+[package]
+name = "crownos-ui-sources"
+description = "Where elements come from: CrownUI's in-app MCP, AT-SPI for every other toolkit, and the agent browser over the DevTools protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+crownos-ui-elements = { workspace = true }
+mcp = { workspace = true }
+rmcp = { workspace = true, features = ["client", "transport-async-rw"] }
+atspi = { workspace = true }
+zbus = { workspace = true }
+base64 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "net", "process", "rt", "sync", "time", "macros"] }
+tracing = { workspace = true }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+anyhow = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }

@@ -1,0 +1,16 @@
+[package]
+name = "crownos-computer-use-protocol"
+description = "The crownos-ipc contract of the computer-use daemon: windows, snapshots, actions, screenshots and the events hooks follow"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+crownos-ipc = { workspace = true }
+crownos-ui-elements = { workspace = true }
+serde = { workspace = true }
+
+[lints]
+workspace = true

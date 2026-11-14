@@ -1,0 +1,30 @@
+[package]
+name = "crownos-computer-use"
+description = "The agent daemon: one trusted process that sees the desktop's windows and elements and acts on them for agents, with its own cursor per agent"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "crownos-computer-use"
+path = "src/main.rs"
+
+[dependencies]
+crownos-computer-use-mcp = { path = "../mcp" }
+crownos-computer-use-protocol = { workspace = true }
+crownos-ipc = { workspace = true, features = ["tokio"] }
+crownos-ui-elements = { workspace = true }
+crownos-ui-sources = { workspace = true }
+crownos-window-layer = { workspace = true }
+
+anyhow = { workspace = true }
+clap = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[lints]
+workspace = true

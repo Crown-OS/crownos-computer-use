@@ -1,0 +1,81 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/elements",
+    "crates/protocol",
+    "crates/sources",
+    "crates/windows",
+    "crates/daemon",
+    "crates/mcp",
+    "crates/events",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/crown-os/crownos-computer-use"
+
+[workspace.dependencies]
+crownos-ui-elements = { path = "crates/elements" }
+crownos-computer-use-protocol = { path = "crates/protocol" }
+crownos-ui-sources = { path = "crates/sources" }
+crownos-window-layer = { path = "crates/windows" }
+crownos-ipc = { path = "../crownos-ipc" }
+crownos-protocols = { path = "../crownos-protocols", features = ["client"] }
+mcp = { path = "../crownui/mcp" }
+
+anyhow = "1.0.100"
+thiserror = "2.0.18"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.52.3", default-features = false }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", default-features = false, features = [
+  "ansi",
+  "env-filter",
+  "fmt",
+  "std",
+] }
+clap = { version = "4.6", features = ["derive"] }
+rmcp = { version = "3.5", default-features = false }
+base64 = "0.22"
+atspi = { version = "0.29", default-features = false, features = ["connection", "proxies", "tokio"] }
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+rustix = { version = "1", default-features = false, features = ["std", "fs", "mm", "event", "process"] }
+png = "0.18"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+todo = "deny"
+unimplemented = "deny"
+redundant_clone = "deny"
+large_enum_variant = "warn"
+needless_pass_by_value = "warn"
+trivially_copy_pass_by_ref = "warn"
+cast_possible_truncation = "warn"
+cast_lossless = "warn"
+missing_const_for_fn = "warn"
+
+[patch."https://github.com/crown-os/crownos-ipc"]
+crownos-ipc = { path = "../crownos-ipc" }
+
+[patch."https://github.com/crown-os/crownos-protocols"]
+crownos-protocols = { path = "../crownos-protocols" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

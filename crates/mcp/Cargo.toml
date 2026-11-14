@@ -1,0 +1,25 @@
+[package]
+name = "crownos-computer-use-mcp"
+description = "The stdio MCP server an agent launches: every daemon request as a tool, screenshots as images, app text marked untrusted"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+crownos-computer-use-protocol = { workspace = true }
+crownos-ipc = { workspace = true, features = ["tokio"] }
+crownos-ui-elements = { workspace = true }
+
+anyhow = { workspace = true }
+base64 = { workspace = true }
+rmcp = { workspace = true, features = ["server", "transport-io"] }
+rustix = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["io-std", "macros", "rt", "sync"] }
+tracing = { workspace = true }
+
+[lints]
+workspace = true

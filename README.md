@@ -24,7 +24,7 @@ something else now is.
 ## Use
 
 ```sh
-crownos-computer-use                       # the daemon, one per session (a user service once packaged)
+crownos-computer-use                       # the daemon, one per session (the crownos-computer-use user service)
 claude mcp add crownos -- crownos-computer-use mcp
 crownos-events tail                        # window and focus events for hook scripts
 ```
@@ -46,14 +46,20 @@ there; the compositor reloads the file live. Without the grant the daemon still 
 `ext_foreign_toplevel_list_v1`: windows are listed by title and app id but carry no process or
 placement, so only CrownUI apps and browser tabs can be read, and nothing can be moved.
 
-`crownos_agent_cursor_v1` is not implemented in the compositor yet. Until it is, every agent's
-input goes through `crownos_input_injector_v1` and shares the user's pointer.
+The daemon gives each agent its own cursor through `crownos_agent_cursor_v1` when the compositor
+offers it, and otherwise sends the input through `crownos_input_injector_v1` on the user's pointer.
 
 ## The agent browser
 
-The daemon drives a Chromium of its own on `$XDG_DATA_HOME/crownos/agent-browser` through
-`--remote-debugging-pipe`. Chromium 136 and later ignore remote debugging on the default profile,
-so the user's browser is never touched. Tabs appear in `list_windows` as `browser:<target>`.
+The daemon drives the browser chosen at install time (Brave, Google Chrome or Chromium) on a profile
+of its own, `$XDG_DATA_HOME/crownos/agent-browser/<browser>`, through `--remote-debugging-pipe`. It
+reads the choice from `/etc/crownos/setup.ron` each time it launches the browser; without that file
+the daemon uses Chromium. While the chosen Chromium-based browser is not installed yet, the daemon
+falls back to Chromium. Firefox cannot be driven over the pipe: when it is the choice, the daemon
+refuses to launch it and returns an error that names the playwright MCP server
+(`crownos-setup playwright-mcp`). Chromium 136 and later ignore remote debugging on the default
+profile, so the user's browser is never touched. Tabs appear in `list_windows` as
+`browser:<target>`.
 
 ## Develop
 

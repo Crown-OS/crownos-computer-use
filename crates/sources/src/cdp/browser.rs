@@ -10,12 +10,13 @@ use tokio::sync::Mutex;
 use super::client::CdpClient;
 use crate::error::SourceError;
 
-const CHROMIUM: &str = "chromium";
+/// The browser a caller can launch when it has no system browser choice.
+pub const DEFAULT_EXECUTABLE: &str = "/usr/bin/chromium";
 /// Our end of the pipe is the child's stdin and stdout; the shell moves them to the fds
-/// Chromium's `--remote-debugging-pipe` reads and writes, then detaches the standard streams.
+/// `--remote-debugging-pipe` reads and writes, then detaches the standard streams.
 const SHELL_ADAPTER: &str = r#"exec 3<&0 4>&1 </dev/null >/dev/null; exec "$@""#;
 
-/// `$XDG_DATA_HOME/crownos/agent-browser`: a profile that is the agent's and nobody else's.
+/// `$XDG_DATA_HOME/crownos/agent-browser`: the agent's profiles, which nobody else uses.
 pub fn default_profile_dir() -> PathBuf {
     let data_home = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
@@ -24,7 +25,7 @@ pub fn default_profile_dir() -> PathBuf {
     data_home.join("crownos/agent-browser")
 }
 
-/// A Chromium this crate launched and talks to.
+/// A Chromium-based browser this crate launched and talks to.
 #[derive(Debug)]
 pub struct Browser {
     child: Child,
@@ -33,19 +34,29 @@ pub struct Browser {
 }
 
 impl Browser {
-    /// Starts Chromium on `profile_dir` and connects.
+    /// Starts the Chromium-based browser at `executable` on `profile_dir` and connects.
     ///
     /// # Errors
     ///
-    /// Fails when Chromium is not installed or dies before answering.
-    pub async fn launch(profile_dir: &Path, extra_args: &[String]) -> Result<Self, SourceError> {
+    /// Fails when the browser is not installed or dies before answering.
+    pub async fn launch(
+        executable: &Path,
+        profile_dir: &Path,
+        extra_args: &[String],
+    ) -> Result<Self, SourceError> {
+        if !executable.is_file() {
+            return Err(SourceError::Browser(format!(
+                "{} is not installed",
+                executable.display()
+            )));
+        }
         std::fs::create_dir_all(profile_dir)?;
         let mut command = Command::new("sh");
         command
             .arg("-c")
             .arg(SHELL_ADAPTER)
             .arg("sh")
-            .arg(CHROMIUM)
+            .arg(executable)
             .arg(format!("--user-data-dir={}", profile_dir.display()))
             .arg("--remote-debugging-pipe")
             .arg("--no-first-run")

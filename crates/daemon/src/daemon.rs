@@ -3,9 +3,11 @@
 use std::collections::HashMap;
 use std::io::Write as _;
 use std::os::fd::OwnedFd;
+use std::path::Path;
 use std::process::Stdio;
 
 use crownos_computer_use_protocol::{ActOutcome, Screenshot, WindowInfo, WindowState};
+use crownos_config::system::{self, BrowserEngine};
 use crownos_ipc::PeerId;
 use crownos_ui_elements::{
     Action, Bounds, Element, Query, Snapshot, SnapshotStore, Source, WindowHandle,
@@ -18,10 +20,10 @@ use crownos_window_layer::util::keymap;
 use crownos_window_layer::{BTN_LEFT, BTN_RIGHT, Compositor, InputEvent, InputFrame};
 
 use crate::agents::Agents;
+use crate::browser_choice::chosen_browser;
 use crate::resolve::{BROWSER_PREFIX, Route, route};
 
 pub(crate) const AUDIT: &str = "crownos::audit::computer_use";
-const BROWSER_APP_ID: &str = "chromium";
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum DaemonError {
@@ -41,6 +43,11 @@ pub(crate) enum DaemonError {
     Resolve(#[from] crownos_ui_elements::ResolveError),
 }
 
+struct RunningBrowser {
+    choice: system::Browser,
+    handle: Browser,
+}
+
 pub(crate) struct Daemon {
     pub(crate) compositor: Compositor,
     pub(crate) agents: Agents,
@@ -48,7 +55,7 @@ pub(crate) struct Daemon {
     crownui: CrownUiApps,
     crownui_sources: HashMap<String, CrownUiSource>,
     atspi: Option<AtspiSource>,
-    browser: Option<Browser>,
+    browser: Option<RunningBrowser>,
 }
 
 impl Daemon {
@@ -82,7 +89,15 @@ impl Daemon {
     pub(crate) async fn list_windows(&mut self) -> Result<Vec<WindowInfo>, DaemonError> {
         let mut windows = self.compositor.windows()?;
         if let Some(browser) = &self.browser {
-            windows.extend(browser.tabs().await?.into_iter().map(tab_window));
+            let app_id = browser.choice.app_id();
+            windows.extend(
+                browser
+                    .handle
+                    .tabs()
+                    .await?
+                    .into_iter()
+                    .map(|tab| tab_window(tab, app_id)),
+            );
         }
         Ok(windows)
     }
@@ -231,20 +246,31 @@ impl Daemon {
         }
     }
 
-    async fn browser(&mut self) -> Result<&Browser, SourceError> {
+    async fn running_browser(&mut self) -> Result<&RunningBrowser, SourceError> {
         if self
             .browser
             .as_mut()
-            .is_none_or(|browser| !browser.is_alive())
+            .is_none_or(|browser| !browser.handle.is_alive())
         {
-            self.browser = Some(Browser::launch(&default_profile_dir(), &[]).await?);
+            let choice = chosen_browser();
+            if choice.engine() == BrowserEngine::Gecko {
+                return Err(SourceError::BrowserUnsupported(choice.name()));
+            }
+            let profile_dir = default_profile_dir().join(choice.id());
+            let handle = Browser::launch(Path::new(choice.executable()), &profile_dir, &[]).await?;
+            self.browser = Some(RunningBrowser { choice, handle });
         }
         self.browser.as_ref().ok_or(SourceError::Gone)
     }
 
+    async fn browser(&mut self) -> Result<&Browser, SourceError> {
+        Ok(&self.running_browser().await?.handle)
+    }
+
     pub(crate) async fn open_url(&mut self, url: &str) -> Result<WindowInfo, DaemonError> {
-        let tab = self.browser().await?.open(url).await?;
-        Ok(tab_window(tab))
+        let browser = self.running_browser().await?;
+        let tab = browser.handle.open(url).await?;
+        Ok(tab_window(tab, browser.choice.app_id()))
     }
 
     pub(crate) async fn screenshot(
@@ -435,10 +461,10 @@ fn keybind_frames(keybind: &str) -> Vec<Vec<InputEvent>> {
     vec![events]
 }
 
-fn tab_window(tab: Tab) -> WindowInfo {
+fn tab_window(tab: Tab, app_id: &str) -> WindowInfo {
     WindowInfo {
         identifier: format!("{BROWSER_PREFIX}{}", tab.target_id),
-        app_id: BROWSER_APP_ID.to_owned(),
+        app_id: app_id.to_owned(),
         title: if tab.title.is_empty() {
             tab.url
         } else {

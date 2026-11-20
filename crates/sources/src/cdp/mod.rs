@@ -1,6 +1,6 @@
-//! The agent browser: a Chromium of its own, with a profile of its own, driven over the DevTools
-//! protocol through a pipe. Chromium 136 and later ignore remote debugging on the default
-//! profile, so the user's browser is never touched from here.
+//! The agent browser: a Chromium-based browser of its own, with a profile of its own, driven over
+//! the DevTools protocol through a pipe. Chromium 136 and later ignore remote debugging on the
+//! default profile, so the user's browser is never touched from here.
 
 #![allow(
     clippy::indexing_slicing,
@@ -18,7 +18,7 @@ use crownos_ui_elements::{Action, Element};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-pub use browser::{Browser, default_profile_dir};
+pub use browser::{Browser, DEFAULT_EXECUTABLE, default_profile_dir};
 pub use client::CdpClient;
 
 use crate::ActResult;

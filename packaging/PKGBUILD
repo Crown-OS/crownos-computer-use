@@ -1,0 +1,40 @@
+# Maintainer: marvelxcodes <ramakrishnan0046@gmail.com>
+#
+# Builds the checkout this file lives in, so run makepkg from packaging/ with
+# the sibling path dependencies checked out next to the repository, as
+# .github/workflows/package.yml does: ../crownos-config, ../crownos-ipc,
+# ../crownos-protocols and ../crownui (plus whatever those path-depend on).
+
+pkgname=crownos-computer-use
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="The CrownOS computer-use daemon for AI agents and the crownos-events CLI"
+arch=(x86_64)
+url="https://github.com/Crown-OS/crownos-computer-use"
+license=('MIT OR Apache-2.0')
+depends=(glibc gcc-libs at-spi2-core dbus wayland)
+optdepends=('chromium: the agent browser when /etc/crownos/setup.ron names no browser')
+makedepends=(cargo clang)
+options=(!lto !debug)
+
+_workspace="$startdir/.."
+
+prepare() {
+  cd "$_workspace"
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/^host: //p')"
+}
+
+build() {
+  cd "$_workspace"
+  export CARGO_TARGET_DIR="$srcdir/target"
+  cargo build --release --frozen -p crownos-computer-use -p crownos-events
+}
+
+package() {
+  cd "$_workspace"
+  install -Dm755 "$srcdir"/target/release/{crownos-computer-use,crownos-events} -t "$pkgdir/usr/bin"
+  install -Dm644 packaging/systemd/crownos-computer-use.service -t "$pkgdir/usr/lib/systemd/user"
+  install -d "$pkgdir/usr/lib/systemd/user/default.target.wants"
+  ln -s ../crownos-computer-use.service "$pkgdir/usr/lib/systemd/user/default.target.wants/crownos-computer-use.service"
+  install -Dm644 LICENSE-{MIT,APACHE} -t "$pkgdir/usr/share/licenses/$pkgname"
+}

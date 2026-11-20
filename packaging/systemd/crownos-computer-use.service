@@ -1,0 +1,16 @@
+# The compositor exports WAYLAND_DISPLAY to the user manager after it starts,
+# so an early start fails and a restart picks it up.
+[Unit]
+Description=CrownOS computer-use daemon for AI agents
+ConditionPathExists=!/run/archiso
+StartLimitIntervalSec=0
+
+[Service]
+Type=exec
+ExecStart=/usr/bin/crownos-computer-use serve
+Restart=on-failure
+RestartSec=3
+Nice=5
+
+[Install]
+WantedBy=default.target

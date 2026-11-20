@@ -10,6 +10,10 @@ pub enum SourceError {
     Atspi(String),
     #[error("the browser said: {0}")]
     Browser(String),
+    #[error(
+        "{0} cannot be driven over the DevTools pipe; use the playwright MCP server (crownos-setup playwright-mcp)"
+    )]
+    BrowserUnsupported(&'static str),
     #[error("the source cannot {0} this element")]
     Unsupported(&'static str),
     #[error("the source went away")]

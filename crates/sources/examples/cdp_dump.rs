@@ -1,11 +1,11 @@
 //! `cdp_dump <profile-dir> <url>`: opens the agent browser on a profile, loads a page, prints
 //! its elements, takes a screenshot and closes the browser again.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use crownos_ui_elements::Action;
-use crownos_ui_sources::cdp::Browser;
+use crownos_ui_sources::cdp::{Browser, DEFAULT_EXECUTABLE};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -17,7 +17,12 @@ async fn main() -> Result<()> {
     let url = arguments
         .next()
         .context("usage: cdp_dump <profile-dir> <url>")?;
-    let browser = Browser::launch(&profile, &["--headless=new".to_owned()]).await?;
+    let browser = Browser::launch(
+        Path::new(DEFAULT_EXECUTABLE),
+        &profile,
+        &["--headless=new".to_owned()],
+    )
+    .await?;
     let tab = browser.open(&url).await?;
     tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
     let elements = browser.elements(&tab.target_id).await?;

@@ -2,6 +2,7 @@
 //! agents. `crownos-computer-use mcp` is the stdio bridge an agent launches to reach it.
 
 mod agents;
+mod browser_choice;
 mod daemon;
 mod resolve;
 mod server;

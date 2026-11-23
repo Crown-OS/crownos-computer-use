@@ -29,5 +29,13 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
+[dev-dependencies]
+crownos-protocols = { workspace = true }
+rustix = { workspace = true }
+serde = { workspace = true }
+wayland-client = { workspace = true }
+wayland-protocols = { workspace = true }
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+
 [lints]
 workspace = true

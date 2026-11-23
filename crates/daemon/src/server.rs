@@ -117,7 +117,9 @@ impl Handler for Requests<'_> {
         name: Option<String>,
         text: Option<String>,
     ) -> Result<Vec<Element>, RemoteError> {
-        Ok(self.daemon.find(&window, &Query { role, name, text }))
+        self.daemon
+            .find(&window, &Query { role, name, text })
+            .map_err(|error| RemoteError::handler(error.to_string()))
     }
 
     fn act(&mut self, reference: String, action: Action) -> Result<ActOutcome, RemoteError> {
@@ -126,6 +128,36 @@ impl Handler for Requests<'_> {
         let handle = self.handle;
         tokio::task::block_in_place(|| handle.block_on(daemon.act(peer, &reference, &action)))
             .map_err(|error| RemoteError::handler(error.to_string()))
+    }
+
+    fn type_secret(&mut self, reference: String, name: String) -> Result<ActOutcome, RemoteError> {
+        let peer = self.peer;
+        let daemon = &mut *self.daemon;
+        let handle = self.handle;
+        tokio::task::block_in_place(|| handle.block_on(daemon.type_secret(peer, &reference, &name)))
+            .map_err(|error| RemoteError::handler(error.to_string()))
+    }
+
+    fn fill_login(
+        &mut self,
+        username_reference: String,
+        password_reference: String,
+        username_name: String,
+        password_name: String,
+    ) -> Result<ActOutcome, RemoteError> {
+        let peer = self.peer;
+        let daemon = &mut *self.daemon;
+        let handle = self.handle;
+        tokio::task::block_in_place(|| {
+            handle.block_on(daemon.fill_login(
+                peer,
+                &username_reference,
+                &password_reference,
+                &username_name,
+                &password_name,
+            ))
+        })
+        .map_err(|error| RemoteError::handler(error.to_string()))
     }
 
     fn screenshot(&mut self, window: String, sink: OwnedFd) -> Result<Screenshot, RemoteError> {

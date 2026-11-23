@@ -100,6 +100,36 @@ impl Bridge {
             .await
     }
 
+    pub(crate) async fn type_secret(&self, reference: String, name: String) -> Reply<ActOutcome> {
+        self.client
+            .lock()
+            .await
+            .call::<proto::type_secret>(&proto::type_secret { reference, name }, Vec::new())
+            .await
+    }
+
+    pub(crate) async fn fill_login(
+        &self,
+        username_reference: String,
+        password_reference: String,
+        username_name: String,
+        password_name: String,
+    ) -> Reply<ActOutcome> {
+        self.client
+            .lock()
+            .await
+            .call::<proto::fill_login>(
+                &proto::fill_login {
+                    username_reference,
+                    password_reference,
+                    username_name,
+                    password_name,
+                },
+                Vec::new(),
+            )
+            .await
+    }
+
     /// The window as PNG bytes with its size.
     pub(crate) async fn screenshot(&self, window: String) -> Reply<(Screenshot, Vec<u8>)> {
         let sink = memfd_create("crownos-computer-use-screenshot", MemfdFlags::CLOEXEC)

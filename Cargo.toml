@@ -25,6 +25,8 @@ crownos-window-layer = { path = "crates/windows" }
 crownos-config = { path = "../crownos-config", default-features = false }
 crownos-ipc = { path = "../crownos-ipc" }
 crownos-protocols = { path = "../crownos-protocols", features = ["client"] }
+secrets-core = { path = "../crownos-secrets-manager/crates/secrets-core" }
+secrets-protocol = { path = "../crownos-secrets-manager/crates/secrets-protocol" }
 mcp = { path = "../crownui/mcp" }
 
 anyhow = "1.0.100"

@@ -5,7 +5,9 @@ mod agents;
 mod browser_choice;
 mod daemon;
 mod resolve;
+mod secret_typing;
 mod server;
+mod typed_fields;
 mod util;
 
 use anyhow::Result;

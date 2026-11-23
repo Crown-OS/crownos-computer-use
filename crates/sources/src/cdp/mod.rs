@@ -9,7 +9,9 @@
 
 mod browser;
 mod client;
+mod focus_check;
 mod keys;
+mod page_state;
 mod pipe;
 mod tree;
 

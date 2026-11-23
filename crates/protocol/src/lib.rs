@@ -42,6 +42,46 @@ pub struct WindowInfo {
     pub browser_tab: bool,
 }
 
+/// What happened to a request to type a stored secret. It never holds the value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SecretTyping {
+    Typed,
+    /// The rules of the secret do not allow this agent, this app or this page.
+    Denied,
+    OriginMismatch,
+    NotPasswordField,
+    FocusChanged,
+    /// The user said no, or the compositor stopped the typing.
+    Cancelled,
+    /// The rules ask for a confirmation and no dialog could show.
+    NeedsConfirmation,
+    RateLimited,
+    Locked,
+    /// No stored secret has this name.
+    Unknown,
+    /// crownos-secretsd is not running, or the compositor cannot type secrets yet.
+    Unavailable,
+    /// A password goes only into a secure element, and a user name never does.
+    NotSecure,
+    /// The compositor knows no such window.
+    UnknownWindow,
+    /// Nobody answered the compositor's confirmation in time.
+    TimedOut,
+    /// The window's app is not the one that the request named.
+    TargetMismatch,
+    /// The session is locked.
+    SessionLocked,
+}
+
+/// What happened to a `type_secret` or `fill_login`, and the page origin after it. It never
+/// holds a value.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SecretReport {
+    pub outcome: SecretTyping,
+    /// The origin of the browser page when the request ended; `None` outside the browser.
+    pub origin: Option<String>,
+}
+
 /// Why an action was not performed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ActOutcome {
@@ -53,6 +93,8 @@ pub enum ActOutcome {
     /// More than the agent's share of actions this second.
     RateLimited,
     Failed(String),
+    /// The outcome of `type_secret` or `fill_login`.
+    Secret(SecretReport),
 }
 
 crownos_ipc::protocol! {
@@ -66,7 +108,14 @@ crownos_ipc::protocol! {
         /// Elements of the current snapshot of `window` matching every given part.
         fn find(window: String, role: Option<String>, name: Option<String>, text: Option<String>) -> Vec<Element>;
         fn act(reference: String, action: Action) -> ActOutcome;
-        /// Writes a PNG of the window into `sink`.
+        /// Focuses the secure element and asks crownos-secretsd to type the stored secret `name`
+        /// into it. The daemon never holds the value.
+        fn type_secret(reference: String, name: String) -> ActOutcome;
+        /// Types the stored user name into one element, a Tab, and the stored password into the
+        /// secure element that follows, as one request with one confirmation.
+        fn fill_login(username_reference: String, password_reference: String, username_name: String, password_name: String) -> ActOutcome;
+        /// Writes a PNG of the window into `sink`. Refused while a secret is typed into the window
+        /// and for 30 seconds after.
         fn screenshot(window: String) fds(sink) -> Screenshot;
         fn focus(window: String);
         fn close(window: String);

@@ -22,6 +22,8 @@ use crownos_window_layer::{BTN_LEFT, BTN_RIGHT, Compositor, InputEvent, InputFra
 use crate::agents::Agents;
 use crate::browser_choice::chosen_browser;
 use crate::resolve::{BROWSER_PREFIX, Route, route};
+use crate::typed_fields::{ReadAccess, TypedFields};
+use crate::util::browser_window::BrowserIdentity;
 
 pub(crate) const AUDIT: &str = "crownos::audit::computer_use";
 
@@ -41,6 +43,10 @@ pub(crate) enum DaemonError {
     Io(#[from] std::io::Error),
     #[error("{0}")]
     Resolve(#[from] crownos_ui_elements::ResolveError),
+    #[error(
+        "{0} shows a field that a secret was typed into; it can be read again after the page navigates or the field is gone"
+    )]
+    Sensitive(String),
 }
 
 struct RunningBrowser {
@@ -51,11 +57,12 @@ struct RunningBrowser {
 pub(crate) struct Daemon {
     pub(crate) compositor: Compositor,
     pub(crate) agents: Agents,
-    snapshots: SnapshotStore,
+    pub(crate) snapshots: SnapshotStore,
     crownui: CrownUiApps,
     crownui_sources: HashMap<String, CrownUiSource>,
     atspi: Option<AtspiSource>,
     browser: Option<RunningBrowser>,
+    pub(crate) typed_fields: TypedFields,
 }
 
 impl Daemon {
@@ -68,6 +75,7 @@ impl Daemon {
             crownui_sources: HashMap::new(),
             atspi: None,
             browser: None,
+            typed_fields: TypedFields::default(),
         }
     }
 
@@ -102,7 +110,7 @@ impl Daemon {
         Ok(windows)
     }
 
-    async fn window(&mut self, identifier: &str) -> Result<WindowInfo, DaemonError> {
+    pub(crate) async fn window(&mut self, identifier: &str) -> Result<WindowInfo, DaemonError> {
         self.list_windows()
             .await?
             .into_iter()
@@ -115,8 +123,13 @@ impl Daemon {
         identifier: &str,
         interactive_only: bool,
     ) -> Result<Snapshot, DaemonError> {
+        self.refresh_typed_fields().await;
+        if self.typed_fields.element_access(identifier) == ReadAccess::Refused {
+            return Err(DaemonError::Sensitive(identifier.to_owned()));
+        }
         let window = self.window(identifier).await?;
-        let (source, elements) = self.elements_of(&window).await?;
+        let (source, mut elements) = self.elements_of(&window).await?;
+        self.typed_fields.hide_values(identifier, &mut elements);
         let snapshot = self
             .snapshots
             .take(WindowHandle(identifier.to_owned()), source, elements);
@@ -127,11 +140,20 @@ impl Daemon {
         })
     }
 
-    pub(crate) fn find(&self, identifier: &str, query: &Query) -> Vec<Element> {
-        self.snapshots
+    /// Searches the stored snapshot, whose typed fields are already hidden.
+    pub(crate) fn find(
+        &self,
+        identifier: &str,
+        query: &Query,
+    ) -> Result<Vec<Element>, DaemonError> {
+        if self.typed_fields.element_access(identifier) == ReadAccess::Refused {
+            return Err(DaemonError::Sensitive(identifier.to_owned()));
+        }
+        Ok(self
+            .snapshots
             .current(&WindowHandle(identifier.to_owned()))
             .map(|snapshot| snapshot.find(query).into_iter().cloned().collect())
-            .unwrap_or_default()
+            .unwrap_or_default())
     }
 
     pub(crate) async fn act(
@@ -181,7 +203,7 @@ impl Daemon {
         Ok(ActOutcome::Done)
     }
 
-    async fn perform(
+    pub(crate) async fn perform(
         &mut self,
         window: &WindowInfo,
         element: &Element,
@@ -263,7 +285,58 @@ impl Daemon {
         self.browser.as_ref().ok_or(SourceError::Gone)
     }
 
-    async fn browser(&mut self) -> Result<&Browser, SourceError> {
+    /// The URL of an agent browser tab, or `None` when the tab is gone.
+    pub(crate) async fn browser_tab_url(
+        &mut self,
+        target_id: &str,
+    ) -> Result<Option<String>, DaemonError> {
+        let tabs = self.browser().await?.tabs().await?;
+        Ok(tabs
+            .into_iter()
+            .find(|tab| tab.target_id == target_id)
+            .map(|tab| tab.url))
+    }
+
+    /// The running agent browser as its windows show it.
+    pub(crate) fn browser_identity(&self) -> Option<BrowserIdentity<'static>> {
+        let browser = self.browser.as_ref()?;
+        Some(BrowserIdentity {
+            app_id: browser.choice.app_id(),
+            name: browser.choice.name(),
+            pid: browser
+                .handle
+                .pid()
+                .and_then(|pid| i32::try_from(pid).ok())?,
+        })
+    }
+
+    /// Forgets the typed browser fields whose page navigated. A field that leaves the document
+    /// stays: a page can put a new node with the same text in its place.
+    async fn refresh_typed_fields(&mut self) {
+        let fields = self.typed_fields.fields().to_vec();
+        let mut gone = Vec::new();
+        for field in fields {
+            let Some(target_id) = field.view.strip_prefix(BROWSER_PREFIX) else {
+                continue;
+            };
+            let current = self.main_frame_loader_id(target_id).await;
+            if !field.is_live_in(current.as_deref()) {
+                gone.push(field);
+            }
+        }
+        self.typed_fields.retain(|field| !gone.contains(field));
+    }
+
+    /// The tab's current document, or `None` when the browser or the tab is gone.
+    async fn main_frame_loader_id(&mut self, target_id: &str) -> Option<String> {
+        let running = self.browser.as_mut()?;
+        if !running.handle.is_alive() {
+            return None;
+        }
+        running.handle.main_frame_loader_id(target_id).await.ok()
+    }
+
+    pub(crate) async fn browser(&mut self) -> Result<&Browser, SourceError> {
         Ok(&self.running_browser().await?.handle)
     }
 
@@ -278,6 +351,10 @@ impl Daemon {
         identifier: &str,
         sink: OwnedFd,
     ) -> Result<Screenshot, DaemonError> {
+        self.refresh_typed_fields().await;
+        if self.typed_fields.picture_access(identifier) == ReadAccess::Refused {
+            return Err(DaemonError::Sensitive(identifier.to_owned()));
+        }
         let (png, width, height) = match identifier.strip_prefix(BROWSER_PREFIX) {
             Some(target) => {
                 let png = self.browser().await?.screenshot(target).await?;
@@ -323,6 +400,7 @@ impl Daemon {
 
     pub(crate) fn forget(&mut self, identifier: &str) {
         self.snapshots.forget(&WindowHandle(identifier.to_owned()));
+        self.typed_fields.forget_window(identifier);
         self.crownui_sources.remove(identifier);
     }
 

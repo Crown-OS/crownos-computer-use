@@ -51,7 +51,7 @@ struct RunningBrowser {
 pub(crate) struct Daemon {
     pub(crate) compositor: Compositor,
     pub(crate) agents: Agents,
-    snapshots: SnapshotStore,
+    pub(crate) snapshots: SnapshotStore,
     crownui: CrownUiApps,
     crownui_sources: HashMap<String, CrownUiSource>,
     atspi: Option<AtspiSource>,
@@ -102,7 +102,7 @@ impl Daemon {
         Ok(windows)
     }
 
-    async fn window(&mut self, identifier: &str) -> Result<WindowInfo, DaemonError> {
+    pub(crate) async fn window(&mut self, identifier: &str) -> Result<WindowInfo, DaemonError> {
         self.list_windows()
             .await?
             .into_iter()
@@ -261,6 +261,18 @@ impl Daemon {
             self.browser = Some(RunningBrowser { choice, handle });
         }
         self.browser.as_ref().ok_or(SourceError::Gone)
+    }
+
+    /// The URL of an agent browser tab, or `None` when the tab is gone.
+    pub(crate) async fn browser_tab_url(
+        &mut self,
+        target_id: &str,
+    ) -> Result<Option<String>, DaemonError> {
+        let tabs = self.browser().await?.tabs().await?;
+        Ok(tabs
+            .into_iter()
+            .find(|tab| tab.target_id == target_id)
+            .map(|tab| tab.url))
     }
 
     async fn browser(&mut self) -> Result<&Browser, SourceError> {

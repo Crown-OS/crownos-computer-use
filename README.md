@@ -29,12 +29,21 @@ claude mcp add crownos -- crownos-computer-use mcp
 crownos-events tail                        # window and focus events for hook scripts
 ```
 
-Tools an agent gets: `list_windows`, `snapshot`, `find`, `act`, `screenshot`, `focus`, `close`,
+Tools an agent gets: `list_windows`, `snapshot`, `find`, `act`, `type_secret`, `fill_login`, `screenshot`, `focus`, `close`,
 `make_visible`, `make_hidden`, `launch` (with `headless` the program opens on the agent
 workspace, out of the user's way), `agent_workspace`, `open_url`. `CROWNOS_AGENT_NAME` and
 `CROWNOS_AGENT_COLOR` name the agent and colour its cursor. Text read from windows is returned
 under an `untrusted_content` marker. Nothing is ever typed into an element that holds a secret,
 and each agent gets at most 20 actions a second.
+
+`type_secret {ref, name}` and `fill_login {username_ref, password_ref, username_name,
+password_name}` type stored secrets by name. The daemon focuses the element, finds the window,
+its app id and, for a browser tab, the page origin from the DevTools target URL, and asks
+crownos-secretsd (`type_into`) to have the compositor type the value. The daemon never holds the
+value; the result says only what happened (`typed`, `denied`, `origin mismatch`, `unavailable`
+…). The secrets' bindings must name `exe:/usr/bin/crownos-computer-use` as an agent. `fill_login`
+types the two secrets in two steps, each with its own confirmation unless the binding allows a
+session.
 
 ## What the compositor must allow
 

@@ -19,6 +19,8 @@ crownos-ipc = { workspace = true, features = ["tokio"] }
 crownos-ui-elements = { workspace = true }
 crownos-ui-sources = { workspace = true }
 crownos-window-layer = { workspace = true }
+secrets-core = { workspace = true }
+secrets-protocol = { workspace = true }
 
 anyhow = { workspace = true }
 clap = { workspace = true }

@@ -5,6 +5,7 @@ mod agents;
 mod browser_choice;
 mod daemon;
 mod resolve;
+mod secret_typing;
 mod server;
 mod util;
 

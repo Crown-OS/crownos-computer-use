@@ -128,6 +128,36 @@ impl Handler for Requests<'_> {
             .map_err(|error| RemoteError::handler(error.to_string()))
     }
 
+    fn type_secret(&mut self, reference: String, name: String) -> Result<ActOutcome, RemoteError> {
+        let peer = self.peer;
+        let daemon = &mut *self.daemon;
+        let handle = self.handle;
+        tokio::task::block_in_place(|| handle.block_on(daemon.type_secret(peer, &reference, &name)))
+            .map_err(|error| RemoteError::handler(error.to_string()))
+    }
+
+    fn fill_login(
+        &mut self,
+        username_reference: String,
+        password_reference: String,
+        username_name: String,
+        password_name: String,
+    ) -> Result<ActOutcome, RemoteError> {
+        let peer = self.peer;
+        let daemon = &mut *self.daemon;
+        let handle = self.handle;
+        tokio::task::block_in_place(|| {
+            handle.block_on(daemon.fill_login(
+                peer,
+                &username_reference,
+                &password_reference,
+                &username_name,
+                &password_name,
+            ))
+        })
+        .map_err(|error| RemoteError::handler(error.to_string()))
+    }
+
     fn screenshot(&mut self, window: String, sink: OwnedFd) -> Result<Screenshot, RemoteError> {
         let daemon = &mut *self.daemon;
         let handle = self.handle;

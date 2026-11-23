@@ -22,7 +22,7 @@ use crownos_window_layer::{BTN_LEFT, BTN_RIGHT, Compositor, InputEvent, InputFra
 use crate::agents::Agents;
 use crate::browser_choice::chosen_browser;
 use crate::resolve::{BROWSER_PREFIX, Route, route};
-use crate::typed_fields::{ReadAccess, TypedField, TypedFields};
+use crate::typed_fields::{ReadAccess, TypedFields};
 use crate::util::browser_window::BrowserIdentity;
 
 pub(crate) const AUDIT: &str = "crownos::audit::computer_use";
@@ -310,7 +310,8 @@ impl Daemon {
         })
     }
 
-    /// Forgets the typed browser fields whose page navigated or that left the document.
+    /// Forgets the typed browser fields whose page navigated. A field that leaves the document
+    /// stays: a page can put a new node with the same text in its place.
     async fn refresh_typed_fields(&mut self) {
         let fields = self.typed_fields.fields().to_vec();
         let mut gone = Vec::new();
@@ -318,30 +319,21 @@ impl Daemon {
             let Some(target_id) = field.view.strip_prefix(BROWSER_PREFIX) else {
                 continue;
             };
-            if !self.browser_field_is_live(target_id, &field).await {
+            let current = self.main_frame_loader_id(target_id).await;
+            if !field.is_live_in(current.as_deref()) {
                 gone.push(field);
             }
         }
         self.typed_fields.retain(|field| !gone.contains(field));
     }
 
-    async fn browser_field_is_live(&mut self, target_id: &str, field: &TypedField) -> bool {
-        let Some(running) = self.browser.as_mut() else {
-            return false;
-        };
+    /// The tab's current document, or `None` when the browser or the tab is gone.
+    async fn main_frame_loader_id(&mut self, target_id: &str) -> Option<String> {
+        let running = self.browser.as_mut()?;
         if !running.handle.is_alive() {
-            return false;
+            return None;
         }
-        let browser = &running.handle;
-        let same_document = browser
-            .main_frame_loader_id(target_id)
-            .await
-            .is_ok_and(|loader_id| Some(loader_id) == field.loader_id);
-        same_document
-            && browser
-                .node_is_connected(target_id, &field.source_id)
-                .await
-                .unwrap_or(false)
+        running.handle.main_frame_loader_id(target_id).await.ok()
     }
 
     pub(crate) async fn browser(&mut self) -> Result<&Browser, SourceError> {

@@ -55,7 +55,7 @@ extra flags, so the agent browser needs none.
 The daemon never holds a value. The result says only what happened (`typed`, `denied`, `focus
 changed`, `timed out` …) and the page origin after the request, so the agent can see a redirect.
 Each field a secret goes into is remembered before the request is sent, under its tab and its
-toplevel, until the page navigates or the field leaves the document (another window's field:
+toplevel, until the page navigates, also when the field leaves the document (another window's field:
 until the window closes). Meanwhile screenshots of the tab and the toplevel are refused,
 snapshots and `find` of the tab hide the field's value and text even when the page reveals a
 password, and snapshots and `find` of the toplevel through another view are refused. The

@@ -1,7 +1,8 @@
 //! Fields a secret was typed into. Their value never goes back to an agent: a snapshot of the
 //! view the field came from hides it and its text, and every other read of the window is
-//! refused while the field is live. A browser field stays live until the page navigates or the
-//! field leaves the document; another field until its window closes.
+//! refused while the field is live. A browser field stays live until the page navigates (the
+//! main frame's document changes), also when the node leaves the document; another field until
+//! its window closes.
 
 use std::collections::HashSet;
 
@@ -17,6 +18,14 @@ pub(crate) struct TypedField {
     pub(crate) source_id: String,
     /// The main-frame document the field was in, for a browser tab.
     pub(crate) loader_id: Option<String>,
+}
+
+impl TypedField {
+    /// Whether the field still counts in a tab whose main frame now shows `current_loader_id`;
+    /// `None` when the tab is gone.
+    pub(crate) fn is_live_in(&self, current_loader_id: Option<&str>) -> bool {
+        current_loader_id.is_some() && self.loader_id.as_deref() == current_loader_id
+    }
 }
 
 #[derive(Default)]
@@ -194,6 +203,24 @@ mod tests {
         typed.forget_window("browser:1");
         assert_eq!(typed.element_access("w7"), ReadAccess::Open);
         assert_eq!(typed.picture_access("w7"), ReadAccess::Open);
+    }
+
+    #[test]
+    fn a_node_replaced_in_the_same_document_stays_hidden() {
+        let typed = typed_in_tab();
+        let Some(field) = typed.fields().first() else {
+            unreachable!("one field was remembered");
+        };
+        assert!(
+            field.is_live_in(Some("L1")),
+            "the same document keeps the field"
+        );
+        assert!(!field.is_live_in(Some("L2")), "a navigation ends it");
+        assert!(!field.is_live_in(None), "a closed tab ends it");
+        let mut replaced = vec![element("88", "Password", Some("hunter2"), 3, false)];
+        typed.hide_values("browser:1", &mut replaced);
+        assert_eq!(typed.picture_access("browser:1"), ReadAccess::Refused);
+        assert_eq!(typed.element_access("w7"), ReadAccess::Refused);
     }
 
     #[test]

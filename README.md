@@ -37,13 +37,24 @@ under an `untrusted_content` marker. Nothing is ever typed into an element that 
 and each agent gets at most 20 actions a second.
 
 `type_secret {ref, name}` and `fill_login {username_ref, password_ref, username_name,
-password_name}` type stored secrets by name. The daemon focuses the element, finds the window,
-its app id and, for a browser tab, the page origin from the DevTools target URL, and asks
-crownos-secretsd (`type_into`) to have the compositor type the value. The daemon never holds the
-value; the result says only what happened (`typed`, `denied`, `origin mismatch`, `unavailable`
-…). The secrets' bindings must name `exe:/usr/bin/crownos-computer-use` as an agent. `fill_login`
-types the two secrets in two steps, each with its own confirmation unless the binding allows a
-session.
+password_name}` type stored secrets by name. `type_secret` types only into a secure (password)
+element. `fill_login` needs a plain element for the user name and a secure element for the
+password, in the same window, and sends one request: the user name, Tab, then the password,
+with one confirmation.
+
+For a browser tab the daemon brings the tab to the front, finds the one browser window whose
+title starts with the tab title, focuses it through the compositor, and checks in the page that
+the element has the focus (`document.hasFocus()` and `activeElement`). A background tab, or two
+windows with the same title, give `focus changed` and nothing is typed. The daemon then asks
+crownos-secretsd (`type_into` or `fill_login`) with the window, its app id and the page origin.
+The compositor shows its own confirmation and types through text-input. Chromium 153 sends the
+text-input password purpose on Wayland without extra flags, so the agent browser needs none.
+
+The daemon never holds a value. The result says only what happened (`typed`, `denied`, `focus
+changed`, `timed out` …) and the page origin after the request, so the agent can see a redirect.
+Screenshots of the tab and of its window are refused while the typing runs and for 30 seconds
+after, and later snapshots never show the value of a field that a user name was typed into. The
+secrets' bindings must name `exe:/usr/bin/crownos-computer-use` as an agent.
 
 ## What the compositor must allow
 

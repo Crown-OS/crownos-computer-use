@@ -1,7 +1,7 @@
 //! The tools agents see, and how each becomes a daemon call.
 
 use base64::Engine as _;
-use crownos_computer_use_protocol::{ActOutcome, SecretTyping};
+use crownos_computer_use_protocol::{ActOutcome, SecretReport, SecretTyping};
 use crownos_ui_elements::Action;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
@@ -43,12 +43,12 @@ const TOOLS: &[(&str, &str, &str)] = &[
     ),
     (
         "type_secret",
-        "Focuses the element and types a stored secret into it by the secret's name (see the crownos-secrets tools). The user may confirm on screen. You never see the value, and none is returned.",
+        "Types a stored secret by its name (see the crownos-secrets tools) into a password element (one marked [secure]). The user confirms on screen. You never see the value, and none is returned; the result names the page origin.",
         r#"{"type":"object","properties":{"ref":{"type":"string"},"name":{"type":"string"}},"required":["ref","name"]}"#,
     ),
     (
         "fill_login",
-        "Types a stored user name into one element and a stored password into another, by the secrets' names. You never see the values, and none is returned.",
+        "Types a stored user name into a text element, then Tab, then a stored password into the password element that follows, by the secrets' names, with one confirmation on screen. You never see the values, and none is returned; the result names the page origin.",
         r#"{"type":"object","properties":{"username_ref":{"type":"string"},"password_ref":{"type":"string"},"username_name":{"type":"string"},"password_name":{"type":"string"}},"required":["username_ref","password_ref","username_name","password_name"]}"#,
     ),
     (
@@ -168,9 +168,7 @@ pub(crate) fn untrusted(data: &Value) -> CallToolResult {
 /// The tool result of an action; a secret outcome holds no value, only what happened.
 fn act_result(outcome: ActOutcome) -> CallToolResult {
     match outcome {
-        ActOutcome::Done | ActOutcome::Secret(SecretTyping::Typed) => {
-            CallToolResult::structured(json!({ "ok": true }))
-        }
+        ActOutcome::Done => CallToolResult::structured(json!({ "ok": true })),
         ActOutcome::Stale(newer) => failure(format!(
             "stale ref: the window is now at snapshot {newer}; snapshot it again and retry"
         )),
@@ -179,8 +177,18 @@ fn act_result(outcome: ActOutcome) -> CallToolResult {
         ),
         ActOutcome::RateLimited => failure("slow down: more than 20 actions this second"),
         ActOutcome::Failed(reason) => failure(reason),
-        ActOutcome::Secret(outcome) => failure(secret_typing_text(outcome)),
+        ActOutcome::Secret(report) => secret_result(&report),
     }
+}
+
+fn secret_result(report: &SecretReport) -> CallToolResult {
+    let origin = report.origin.as_deref().map_or_else(String::new, |origin| {
+        format!(" The page origin is now {origin}; check that it is the site you meant.")
+    });
+    if report.outcome == SecretTyping::Typed {
+        return CallToolResult::structured(json!({ "ok": true, "page_origin": report.origin }));
+    }
+    failure(format!("{}.{origin}", secret_typing_text(report.outcome)))
 }
 
 const fn secret_typing_text(outcome: SecretTyping) -> &'static str {
@@ -193,8 +201,10 @@ const fn secret_typing_text(outcome: SecretTyping) -> &'static str {
             "denied: the page origin does not match the rules of this secret"
         }
         SecretTyping::NotPasswordField => "refused: the focused field is not a password field",
-        SecretTyping::FocusChanged => "stopped: the focus left the window before typing",
-        SecretTyping::Cancelled => "stopped: the user or the compositor cancelled the typing",
+        SecretTyping::FocusChanged => {
+            "stopped: the field did not have the focus, or its browser window was not clear"
+        }
+        SecretTyping::Cancelled => "stopped: the user said no, or the typing was cancelled",
         SecretTyping::NeedsConfirmation => {
             "refused: the secret needs a confirmation on screen, and none could show"
         }
@@ -202,8 +212,15 @@ const fn secret_typing_text(outcome: SecretTyping) -> &'static str {
         SecretTyping::Locked => "the vault is locked; ask the user to run `crownos-secrets unlock`",
         SecretTyping::Unknown => "no stored secret has this name",
         SecretTyping::Unavailable => {
-            "not available: crownos-secretsd is not running, or the compositor cannot type secrets yet"
+            "not available: crownos-secretsd is not running, or the compositor cannot type secrets"
         }
+        SecretTyping::NotSecure => {
+            "refused: a password goes only into a password element, and a user name never does"
+        }
+        SecretTyping::UnknownWindow => "stopped: the window is gone",
+        SecretTyping::TimedOut => "stopped: the user did not answer the confirmation in time",
+        SecretTyping::TargetMismatch => "refused: the window belongs to another app",
+        SecretTyping::SessionLocked => "stopped: the screen is locked",
     }
 }
 
@@ -397,12 +414,21 @@ mod tests {
             SecretTyping::Denied,
             SecretTyping::Unavailable,
             SecretTyping::NeedsConfirmation,
+            SecretTyping::NotSecure,
         ] {
-            let result = act_result(ActOutcome::Secret(outcome));
+            let result = act_result(ActOutcome::Secret(SecretReport {
+                outcome,
+                origin: None,
+            }));
             assert_eq!(result.is_error, Some(true));
         }
-        let typed = act_result(ActOutcome::Secret(SecretTyping::Typed));
-        assert_eq!(typed.structured_content.unwrap()["ok"], true);
+        let typed = act_result(ActOutcome::Secret(SecretReport {
+            outcome: SecretTyping::Typed,
+            origin: Some("https://login.example.com".into()),
+        }));
+        let content = typed.structured_content.unwrap();
+        assert_eq!(content["ok"], true);
+        assert_eq!(content["page_origin"], "https://login.example.com");
         let arguments: Map<String, Value> =
             serde_json::from_value(json!({ "ref": "@s1:e2", "name": "github_token" })).unwrap();
         let parsed: TypeSecretArguments = parse(arguments).map_err(|_| ()).unwrap();

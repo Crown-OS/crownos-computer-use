@@ -22,6 +22,8 @@ use crownos_window_layer::{BTN_LEFT, BTN_RIGHT, Compositor, InputEvent, InputFra
 use crate::agents::Agents;
 use crate::browser_choice::chosen_browser;
 use crate::resolve::{BROWSER_PREFIX, Route, route};
+use crate::sensitive_windows::SensitiveWindows;
+use crate::typed_fields::TypedFields;
 
 pub(crate) const AUDIT: &str = "crownos::audit::computer_use";
 
@@ -41,6 +43,8 @@ pub(crate) enum DaemonError {
     Io(#[from] std::io::Error),
     #[error("{0}")]
     Resolve(#[from] crownos_ui_elements::ResolveError),
+    #[error("{0} shows a field that a secret is typed into; try again in 30 seconds")]
+    Sensitive(String),
 }
 
 struct RunningBrowser {
@@ -56,6 +60,8 @@ pub(crate) struct Daemon {
     crownui_sources: HashMap<String, CrownUiSource>,
     atspi: Option<AtspiSource>,
     browser: Option<RunningBrowser>,
+    pub(crate) sensitive: SensitiveWindows,
+    pub(crate) typed_fields: TypedFields,
 }
 
 impl Daemon {
@@ -68,6 +74,8 @@ impl Daemon {
             crownui_sources: HashMap::new(),
             atspi: None,
             browser: None,
+            sensitive: SensitiveWindows::default(),
+            typed_fields: TypedFields::default(),
         }
     }
 
@@ -116,7 +124,8 @@ impl Daemon {
         interactive_only: bool,
     ) -> Result<Snapshot, DaemonError> {
         let window = self.window(identifier).await?;
-        let (source, elements) = self.elements_of(&window).await?;
+        let (source, mut elements) = self.elements_of(&window).await?;
+        self.typed_fields.hide_values(identifier, &mut elements);
         let snapshot = self
             .snapshots
             .take(WindowHandle(identifier.to_owned()), source, elements);
@@ -181,7 +190,7 @@ impl Daemon {
         Ok(ActOutcome::Done)
     }
 
-    async fn perform(
+    pub(crate) async fn perform(
         &mut self,
         window: &WindowInfo,
         element: &Element,
@@ -275,7 +284,7 @@ impl Daemon {
             .map(|tab| tab.url))
     }
 
-    async fn browser(&mut self) -> Result<&Browser, SourceError> {
+    pub(crate) async fn browser(&mut self) -> Result<&Browser, SourceError> {
         Ok(&self.running_browser().await?.handle)
     }
 
@@ -290,6 +299,9 @@ impl Daemon {
         identifier: &str,
         sink: OwnedFd,
     ) -> Result<Screenshot, DaemonError> {
+        if self.sensitive.is_sensitive(identifier) {
+            return Err(DaemonError::Sensitive(identifier.to_owned()));
+        }
         let (png, width, height) = match identifier.strip_prefix(BROWSER_PREFIX) {
             Some(target) => {
                 let png = self.browser().await?.screenshot(target).await?;
@@ -335,6 +347,7 @@ impl Daemon {
 
     pub(crate) fn forget(&mut self, identifier: &str) {
         self.snapshots.forget(&WindowHandle(identifier.to_owned()));
+        self.typed_fields.forget_window(identifier);
         self.crownui_sources.remove(identifier);
     }
 

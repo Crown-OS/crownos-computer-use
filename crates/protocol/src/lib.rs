@@ -61,6 +61,25 @@ pub enum SecretTyping {
     Unknown,
     /// crownos-secretsd is not running, or the compositor cannot type secrets yet.
     Unavailable,
+    /// A password goes only into a secure element, and a user name never does.
+    NotSecure,
+    /// The compositor knows no such window.
+    UnknownWindow,
+    /// Nobody answered the compositor's confirmation in time.
+    TimedOut,
+    /// The window's app is not the one that the request named.
+    TargetMismatch,
+    /// The session is locked.
+    SessionLocked,
+}
+
+/// What happened to a `type_secret` or `fill_login`, and the page origin after it. It never
+/// holds a value.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SecretReport {
+    pub outcome: SecretTyping,
+    /// The origin of the browser page when the request ended; `None` outside the browser.
+    pub origin: Option<String>,
 }
 
 /// Why an action was not performed.
@@ -75,7 +94,7 @@ pub enum ActOutcome {
     RateLimited,
     Failed(String),
     /// The outcome of `type_secret` or `fill_login`.
-    Secret(SecretTyping),
+    Secret(SecretReport),
 }
 
 crownos_ipc::protocol! {
@@ -89,12 +108,14 @@ crownos_ipc::protocol! {
         /// Elements of the current snapshot of `window` matching every given part.
         fn find(window: String, role: Option<String>, name: Option<String>, text: Option<String>) -> Vec<Element>;
         fn act(reference: String, action: Action) -> ActOutcome;
-        /// Focuses the element and asks crownos-secretsd to type the stored secret `name` into
-        /// it. The daemon never holds the value.
+        /// Focuses the secure element and asks crownos-secretsd to type the stored secret `name`
+        /// into it. The daemon never holds the value.
         fn type_secret(reference: String, name: String) -> ActOutcome;
-        /// Types the stored user name into one element and the stored password into another.
+        /// Types the stored user name into one element, a Tab, and the stored password into the
+        /// secure element that follows, as one request with one confirmation.
         fn fill_login(username_reference: String, password_reference: String, username_name: String, password_name: String) -> ActOutcome;
-        /// Writes a PNG of the window into `sink`.
+        /// Writes a PNG of the window into `sink`. Refused while a secret is typed into the window
+        /// and for 30 seconds after.
         fn screenshot(window: String) fds(sink) -> Screenshot;
         fn focus(window: String);
         fn close(window: String);

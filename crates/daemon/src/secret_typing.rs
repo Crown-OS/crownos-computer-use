@@ -180,13 +180,7 @@ impl Daemon {
                     .any(|candidate| candidate.identifier == toplevel && candidate.state.activated))
             })
             .await?;
-        if !activated
-            || !self
-                .browser()
-                .await?
-                .focus_and_check(target_id, &field.element)
-                .await?
-        {
+        if !activated || !self.focus_field_in_tab(target_id, &field.element).await? {
             return Ok(Err(SecretTyping::FocusChanged));
         }
         let origin = self
@@ -223,6 +217,29 @@ impl Daemon {
             }
             if Instant::now() >= deadline {
                 return Ok(None);
+            }
+            tokio::time::sleep(FOCUS_POLL).await;
+        }
+    }
+
+    /// Focuses the element until the page reports that it holds the keyboard focus.
+    async fn focus_field_in_tab(
+        &mut self,
+        target_id: &str,
+        element: &Element,
+    ) -> Result<bool, DaemonError> {
+        let deadline = Instant::now() + FOCUS_WAIT;
+        loop {
+            if self
+                .browser()
+                .await?
+                .focus_and_check(target_id, element)
+                .await?
+            {
+                return Ok(true);
+            }
+            if Instant::now() >= deadline {
+                return Ok(false);
             }
             tokio::time::sleep(FOCUS_POLL).await;
         }

@@ -83,6 +83,12 @@ impl Browser {
         &self.client
     }
 
+    /// The browser's process id. The launcher shell `exec`s the browser, so this is the
+    /// process that connects to the compositor.
+    pub fn pid(&self) -> Option<u32> {
+        self.child.id()
+    }
+
     /// Whether the browser process is still there.
     pub fn is_alive(&mut self) -> bool {
         matches!(self.child.try_wait(), Ok(None))

@@ -117,7 +117,9 @@ impl Handler for Requests<'_> {
         name: Option<String>,
         text: Option<String>,
     ) -> Result<Vec<Element>, RemoteError> {
-        Ok(self.daemon.find(&window, &Query { role, name, text }))
+        self.daemon
+            .find(&window, &Query { role, name, text })
+            .map_err(|error| RemoteError::handler(error.to_string()))
     }
 
     fn act(&mut self, reference: String, action: Action) -> Result<ActOutcome, RemoteError> {

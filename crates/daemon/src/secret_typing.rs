@@ -13,15 +13,13 @@ use secrets_protocol::{TypingTarget, error_code, secrets};
 
 use crate::daemon::{AUDIT, Daemon, DaemonError};
 use crate::resolve::BROWSER_PREFIX;
-use crate::sensitive_windows::SENSITIVE_AFTER;
+use crate::typed_fields::TypedField;
 use crate::util::browser_window::browser_toplevel;
 use crate::util::origin::origin_of;
 
 /// How long the browser window has to come to the front and take the focus.
 const FOCUS_WAIT: Duration = Duration::from_millis(1500);
 const FOCUS_POLL: Duration = Duration::from_millis(50);
-/// Room for the confirmation and the typing, before the time after it.
-const TYPING_TIME: Duration = Duration::from_secs(150);
 
 /// An element of a snapshot that a secret may go into.
 struct SecretField {
@@ -56,7 +54,7 @@ impl Daemon {
             return Ok(report(SecretTyping::NotSecure, None));
         }
         tracing::info!(target: AUDIT, agent = %self.agents.name(peer), %reference, secret = %name, window = %field.window, "type secret");
-        self.type_into_field(&field, Typing::Secret(name)).await
+        self.type_into_fields(&[&field], Typing::Secret(name)).await
     }
 
     pub(crate) async fn fill_login(
@@ -85,12 +83,11 @@ impl Daemon {
             return Ok(report(SecretTyping::NotSecure, None));
         }
         tracing::info!(target: AUDIT, agent = %self.agents.name(peer), %username_reference, %password_reference, username = %username, password = %password, window = %username_field.window, "fill login");
-        let outcome = self
-            .type_into_field(&username_field, Typing::Login { username, password })
-            .await?;
-        self.typed_fields
-            .remember(&username_field.window, &username_field.element);
-        Ok(outcome)
+        self.type_into_fields(
+            &[&username_field, &password_field],
+            Typing::Login { username, password },
+        )
+        .await
     }
 
     /// Resolves a ref for typing, under the agent's rate limit. `Err` is the outcome to answer.
@@ -117,23 +114,38 @@ impl Daemon {
         }
     }
 
-    async fn type_into_field(
+    /// Focuses the first field and asks for the typing. Every field is remembered as typed
+    /// before the request goes out, so no read shows it from then on.
+    async fn type_into_fields(
         &mut self,
-        field: &SecretField,
+        fields: &[&SecretField],
         typing: Typing,
     ) -> Result<ActOutcome, DaemonError> {
+        let Some(field) = fields.first().copied() else {
+            return Ok(report(SecretTyping::NotSecure, None));
+        };
         let target = match self.typing_target(field).await? {
             Ok(target) => target,
             Err(outcome) => return Ok(report(outcome, None)),
         };
-        let windows = [field.window.clone(), target.window.clone()];
-        for window in &windows {
-            self.sensitive.mark(window, TYPING_TIME + SENSITIVE_AFTER);
+        let loader_id = match field.window.strip_prefix(BROWSER_PREFIX) {
+            Some(target_id) => Some(
+                self.browser()
+                    .await?
+                    .main_frame_loader_id(target_id)
+                    .await?,
+            ),
+            None => None,
+        };
+        for typed in fields {
+            self.typed_fields.remember(TypedField {
+                view: typed.window.clone(),
+                toplevel: target.window.clone(),
+                source_id: typed.element.source_id.clone(),
+                loader_id: loader_id.clone(),
+            });
         }
         let outcome = ask_secretsd(typing, target).await;
-        for window in &windows {
-            self.sensitive.mark(window, SENSITIVE_AFTER);
-        }
         let origin = match field.window.strip_prefix(BROWSER_PREFIX) {
             Some(target_id) => self
                 .browser_tab_url(target_id)
@@ -167,7 +179,7 @@ impl Daemon {
             }));
         };
         self.browser().await?.bring_to_front(target_id).await?;
-        let Some(toplevel) = self.browser_toplevel_of(target_id, &window.app_id).await? else {
+        let Some(toplevel) = self.browser_toplevel_of(target_id).await? else {
             return Ok(Err(SecretTyping::FocusChanged));
         };
         self.compositor.focus(&toplevel)?;
@@ -181,6 +193,9 @@ impl Daemon {
             })
             .await?;
         if !activated || !self.focus_field_in_tab(target_id, &field.element).await? {
+            return Ok(Err(SecretTyping::FocusChanged));
+        }
+        if self.browser_toplevel_of(target_id).await?.as_ref() != Some(&toplevel) {
             return Ok(Err(SecretTyping::FocusChanged));
         }
         let origin = self
@@ -198,8 +213,10 @@ impl Daemon {
     async fn browser_toplevel_of(
         &mut self,
         target_id: &str,
-        app_id: &str,
     ) -> Result<Option<String>, DaemonError> {
+        let Some(browser) = self.browser_identity() else {
+            return Ok(None);
+        };
         let deadline = Instant::now() + FOCUS_WAIT;
         loop {
             let title = self
@@ -212,7 +229,7 @@ impl Daemon {
                 .map(|tab| tab.title)
                 .unwrap_or_default();
             let windows = self.compositor.windows()?;
-            if let Ok(toplevel) = browser_toplevel(&windows, app_id, &title) {
+            if let Ok(toplevel) = browser_toplevel(&windows, browser, &title) {
                 return Ok(Some(toplevel.identifier.clone()));
             }
             if Instant::now() >= deadline {

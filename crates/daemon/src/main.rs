@@ -6,7 +6,6 @@ mod browser_choice;
 mod daemon;
 mod resolve;
 mod secret_typing;
-mod sensitive_windows;
 mod server;
 mod typed_fields;
 mod util;

@@ -42,19 +42,25 @@ element. `fill_login` needs a plain element for the user name and a secure eleme
 password, in the same window, and sends one request: the user name, Tab, then the password,
 with one confirmation.
 
-For a browser tab the daemon brings the tab to the front, finds the one browser window whose
-title starts with the tab title, focuses it through the compositor, and checks in the page that
-the element has the focus (`document.hasFocus()` and `activeElement`). A background tab, or two
-windows with the same title, give `focus changed` and nothing is typed. The daemon then asks
-crownos-secretsd (`type_into` or `fill_login`) with the window, its app id and the page origin.
-The compositor shows its own confirmation and types through text-input. Chromium 153 sends the
-text-input password purpose on Wayland without extra flags, so the agent browser needs none.
+For a browser tab the daemon brings the tab to the front, finds the one window of the agent
+browser process whose title is exactly `<tab title> - <browser name>`, focuses it through the
+compositor, checks in the page that the element has the focus (`document.hasFocus()` and
+`activeElement`), and checks the window again. A background tab, a title that only starts the
+same, another browser process or two windows with the same title give `focus changed`, and
+nothing is typed. The daemon then asks crownos-secretsd (`type_into` or `fill_login`) with the
+window, its app id and the page origin. The compositor shows its own confirmation and types
+through text-input. Chromium 153 sends the text-input password purpose on Wayland without
+extra flags, so the agent browser needs none.
 
 The daemon never holds a value. The result says only what happened (`typed`, `denied`, `focus
 changed`, `timed out` …) and the page origin after the request, so the agent can see a redirect.
-Screenshots of the tab and of its window are refused while the typing runs and for 30 seconds
-after, and later snapshots never show the value of a field that a user name was typed into. The
-secrets' bindings must name `exe:/usr/bin/crownos-computer-use` as an agent.
+Each field a secret goes into is remembered before the request is sent, under its tab and its
+toplevel, until the page navigates or the field leaves the document (another window's field:
+until the window closes). Meanwhile screenshots of the tab and the toplevel are refused,
+snapshots and `find` of the tab hide the field's value and text even when the page reveals a
+password, and snapshots and `find` of the toplevel through another view are refused. The
+secrets' bindings must name `exe:/usr/bin/crownos-computer-use` as an agent, and crownos-secretsd
+takes typing requests only from the installed, root-owned computer-use daemon.
 
 ## What the compositor must allow
 

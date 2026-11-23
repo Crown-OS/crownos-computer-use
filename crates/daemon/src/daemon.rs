@@ -22,8 +22,8 @@ use crownos_window_layer::{BTN_LEFT, BTN_RIGHT, Compositor, InputEvent, InputFra
 use crate::agents::Agents;
 use crate::browser_choice::chosen_browser;
 use crate::resolve::{BROWSER_PREFIX, Route, route};
-use crate::sensitive_windows::SensitiveWindows;
-use crate::typed_fields::TypedFields;
+use crate::typed_fields::{ReadAccess, TypedField, TypedFields};
+use crate::util::browser_window::BrowserIdentity;
 
 pub(crate) const AUDIT: &str = "crownos::audit::computer_use";
 
@@ -43,7 +43,9 @@ pub(crate) enum DaemonError {
     Io(#[from] std::io::Error),
     #[error("{0}")]
     Resolve(#[from] crownos_ui_elements::ResolveError),
-    #[error("{0} shows a field that a secret is typed into; try again in 30 seconds")]
+    #[error(
+        "{0} shows a field that a secret was typed into; it can be read again after the page navigates or the field is gone"
+    )]
     Sensitive(String),
 }
 
@@ -60,7 +62,6 @@ pub(crate) struct Daemon {
     crownui_sources: HashMap<String, CrownUiSource>,
     atspi: Option<AtspiSource>,
     browser: Option<RunningBrowser>,
-    pub(crate) sensitive: SensitiveWindows,
     pub(crate) typed_fields: TypedFields,
 }
 
@@ -74,7 +75,6 @@ impl Daemon {
             crownui_sources: HashMap::new(),
             atspi: None,
             browser: None,
-            sensitive: SensitiveWindows::default(),
             typed_fields: TypedFields::default(),
         }
     }
@@ -123,6 +123,10 @@ impl Daemon {
         identifier: &str,
         interactive_only: bool,
     ) -> Result<Snapshot, DaemonError> {
+        self.refresh_typed_fields().await;
+        if self.typed_fields.element_access(identifier) == ReadAccess::Refused {
+            return Err(DaemonError::Sensitive(identifier.to_owned()));
+        }
         let window = self.window(identifier).await?;
         let (source, mut elements) = self.elements_of(&window).await?;
         self.typed_fields.hide_values(identifier, &mut elements);
@@ -136,11 +140,20 @@ impl Daemon {
         })
     }
 
-    pub(crate) fn find(&self, identifier: &str, query: &Query) -> Vec<Element> {
-        self.snapshots
+    /// Searches the stored snapshot, whose typed fields are already hidden.
+    pub(crate) fn find(
+        &self,
+        identifier: &str,
+        query: &Query,
+    ) -> Result<Vec<Element>, DaemonError> {
+        if self.typed_fields.element_access(identifier) == ReadAccess::Refused {
+            return Err(DaemonError::Sensitive(identifier.to_owned()));
+        }
+        Ok(self
+            .snapshots
             .current(&WindowHandle(identifier.to_owned()))
             .map(|snapshot| snapshot.find(query).into_iter().cloned().collect())
-            .unwrap_or_default()
+            .unwrap_or_default())
     }
 
     pub(crate) async fn act(
@@ -284,6 +297,53 @@ impl Daemon {
             .map(|tab| tab.url))
     }
 
+    /// The running agent browser as its windows show it.
+    pub(crate) fn browser_identity(&self) -> Option<BrowserIdentity<'static>> {
+        let browser = self.browser.as_ref()?;
+        Some(BrowserIdentity {
+            app_id: browser.choice.app_id(),
+            name: browser.choice.name(),
+            pid: browser
+                .handle
+                .pid()
+                .and_then(|pid| i32::try_from(pid).ok())?,
+        })
+    }
+
+    /// Forgets the typed browser fields whose page navigated or that left the document.
+    async fn refresh_typed_fields(&mut self) {
+        let fields = self.typed_fields.fields().to_vec();
+        let mut gone = Vec::new();
+        for field in fields {
+            let Some(target_id) = field.view.strip_prefix(BROWSER_PREFIX) else {
+                continue;
+            };
+            if !self.browser_field_is_live(target_id, &field).await {
+                gone.push(field);
+            }
+        }
+        self.typed_fields.retain(|field| !gone.contains(field));
+    }
+
+    async fn browser_field_is_live(&mut self, target_id: &str, field: &TypedField) -> bool {
+        let Some(running) = self.browser.as_mut() else {
+            return false;
+        };
+        if !running.handle.is_alive() {
+            return false;
+        }
+        let browser = &running.handle;
+        let same_document = browser
+            .main_frame_loader_id(target_id)
+            .await
+            .is_ok_and(|loader_id| Some(loader_id) == field.loader_id);
+        same_document
+            && browser
+                .node_is_connected(target_id, &field.source_id)
+                .await
+                .unwrap_or(false)
+    }
+
     pub(crate) async fn browser(&mut self) -> Result<&Browser, SourceError> {
         Ok(&self.running_browser().await?.handle)
     }
@@ -299,7 +359,8 @@ impl Daemon {
         identifier: &str,
         sink: OwnedFd,
     ) -> Result<Screenshot, DaemonError> {
-        if self.sensitive.is_sensitive(identifier) {
+        self.refresh_typed_fields().await;
+        if self.typed_fields.picture_access(identifier) == ReadAccess::Refused {
             return Err(DaemonError::Sensitive(identifier.to_owned()));
         }
         let (png, width, height) = match identifier.strip_prefix(BROWSER_PREFIX) {

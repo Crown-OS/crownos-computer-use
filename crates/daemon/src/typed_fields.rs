@@ -1,32 +1,100 @@
-//! Fields a secret was typed into. Their value never goes back to an agent.
+//! Fields a secret was typed into. Their value never goes back to an agent: a snapshot of the
+//! view the field came from hides it and its text, and every other read of the window is
+//! refused while the field is live. A browser field stays live until the page navigates or the
+//! field leaves the document; another field until its window closes.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crownos_ui_elements::Element;
 
+/// One field, remembered under the view it came from and its toplevel.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TypedField {
+    /// The snapshot window of the field: a `browser:` tab or a toplevel.
+    pub(crate) view: String,
+    /// The compositor toplevel that shows the field.
+    pub(crate) toplevel: String,
+    pub(crate) source_id: String,
+    /// The main-frame document the field was in, for a browser tab.
+    pub(crate) loader_id: Option<String>,
+}
+
 #[derive(Default)]
 pub(crate) struct TypedFields {
-    by_window: HashMap<String, HashSet<String>>,
+    fields: Vec<TypedField>,
+}
+
+/// How a read of one window may go on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReadAccess {
+    Open,
+    /// Elements may be read with the typed fields hidden; a picture may not.
+    HideTypedFields,
+    Refused,
 }
 
 impl TypedFields {
-    pub(crate) fn remember(&mut self, window: &str, element: &Element) {
-        self.by_window
-            .entry(window.to_owned())
-            .or_default()
-            .insert(element.source_id.clone());
+    pub(crate) fn remember(&mut self, field: TypedField) {
+        if !self.fields.contains(&field) {
+            self.fields.push(field);
+        }
+    }
+
+    pub(crate) fn fields(&self) -> &[TypedField] {
+        &self.fields
+    }
+
+    pub(crate) fn retain(&mut self, keep: impl FnMut(&TypedField) -> bool) {
+        self.fields.retain(keep);
     }
 
     pub(crate) fn forget_window(&mut self, window: &str) {
-        self.by_window.remove(window);
+        self.fields
+            .retain(|field| field.view != window && field.toplevel != window);
     }
 
-    /// Drops the value of each element of `window` that a secret was typed into, and the text
-    /// of its descendants, where a browser repeats the value. Elements come in tree order.
+    /// Element reads of the view itself hide the fields; reads of its toplevel through another
+    /// view, where the field cannot be found, are refused.
+    pub(crate) fn element_access(&self, window: &str) -> ReadAccess {
+        if self
+            .fields
+            .iter()
+            .any(|field| field.toplevel == window && field.view != window)
+        {
+            ReadAccess::Refused
+        } else if self.fields.iter().any(|field| field.view == window) {
+            ReadAccess::HideTypedFields
+        } else {
+            ReadAccess::Open
+        }
+    }
+
+    /// A picture of the window shows the field, so it waits until no field is live there.
+    pub(crate) fn picture_access(&self, window: &str) -> ReadAccess {
+        if self
+            .fields
+            .iter()
+            .any(|field| field.view == window || field.toplevel == window)
+        {
+            ReadAccess::Refused
+        } else {
+            ReadAccess::Open
+        }
+    }
+
+    /// Drops the value of each typed field of `window`, and the text of its descendants, where
+    /// a browser repeats the value. Elements come in tree order. `secure` does not matter: a
+    /// page can reveal a password field and keep the node.
     pub(crate) fn hide_values(&self, window: &str, elements: &mut [Element]) {
-        let Some(typed) = self.by_window.get(window) else {
+        let typed: HashSet<&str> = self
+            .fields
+            .iter()
+            .filter(|field| field.view == window)
+            .map(|field| field.source_id.as_str())
+            .collect();
+        if typed.is_empty() {
             return;
-        };
+        }
         let mut typed_field_depth = None;
         for element in elements.iter_mut() {
             if typed_field_depth.is_some_and(|depth| element.depth > depth) {
@@ -34,7 +102,9 @@ impl TypedFields {
                 element.value = None;
                 continue;
             }
-            typed_field_depth = typed.contains(&element.source_id).then_some(element.depth);
+            typed_field_depth = typed
+                .contains(element.source_id.as_str())
+                .then_some(element.depth);
             if typed_field_depth.is_some() {
                 element.value = None;
             }
@@ -48,11 +118,13 @@ mod tests {
 
     use super::*;
 
-    fn field(source_id: &str, value: &str) -> Element {
-        element(source_id, "Email", Some(value), 0)
-    }
-
-    fn element(source_id: &str, name: &str, value: Option<&str>, depth: u8) -> Element {
+    fn element(
+        source_id: &str,
+        name: &str,
+        value: Option<&str>,
+        depth: u8,
+        secure: bool,
+    ) -> Element {
         Element {
             reference: "@s1:e1"
                 .parse::<ElementRef>()
@@ -62,51 +134,86 @@ mod tests {
             value: value.map(str::to_owned),
             bounds: Bounds::default(),
             actions: Vec::new(),
-            secure: false,
+            secure,
             source: Source::Browser,
             source_id: source_id.into(),
             depth,
         }
     }
 
-    #[test]
-    fn a_snapshot_after_typing_shows_no_value_of_the_typed_field() {
+    fn typed_in_tab() -> TypedFields {
         let mut typed = TypedFields::default();
-        typed.remember("browser:1", &field("41", "alice@example.com"));
-        let mut elements = vec![field("41", "alice@example.com"), field("42", "search")];
-        typed.hide_values("browser:1", &mut elements);
-        let values = |elements: &[Element]| -> Vec<Option<String>> {
-            elements
-                .iter()
-                .map(|element| element.value.clone())
-                .collect()
-        };
-        assert_eq!(values(&elements), [None, Some("search".into())]);
-        let mut other_window = vec![field("41", "visible")];
-        typed.hide_values("browser:2", &mut other_window);
-        assert_eq!(values(&other_window), [Some("visible".into())]);
-        typed.forget_window("browser:1");
-        let mut after_close = vec![field("41", "new page")];
-        typed.hide_values("browser:1", &mut after_close);
-        assert_eq!(values(&after_close), [Some("new page".into())]);
+        typed.remember(TypedField {
+            view: "browser:1".into(),
+            toplevel: "w7".into(),
+            source_id: "41".into(),
+            loader_id: Some("L1".into()),
+        });
+        typed
+    }
+
+    fn values(elements: &[Element]) -> Vec<(String, Option<String>)> {
+        elements
+            .iter()
+            .map(|element| (element.name.clone(), element.value.clone()))
+            .collect()
     }
 
     #[test]
-    fn the_text_below_a_typed_field_is_hidden_too() {
-        let mut typed = TypedFields::default();
-        typed.remember("browser:1", &element("41", "Email", Some("alice"), 3));
+    fn a_snapshot_after_a_reveal_toggle_still_hides_the_field_and_its_text() {
+        let typed = typed_in_tab();
         let mut elements = vec![
-            element("41", "Email", Some("alice"), 3),
-            element("50", "", None, 4),
-            element("51", "alice", None, 5),
-            element("60", "Password", None, 3),
+            element("41", "Password", Some("hunter2"), 3, false),
+            element("50", "", None, 4, false),
+            element("51", "hunter2", None, 5, false),
+            element("60", "Sign in", None, 3, false),
         ];
         typed.hide_values("browser:1", &mut elements);
-        let names: Vec<&str> = elements
-            .iter()
-            .map(|element| element.name.as_str())
-            .collect();
-        assert_eq!(names, ["Email", "", "", "Password"]);
-        assert!(elements.iter().all(|element| element.value.is_none()));
+        assert_eq!(
+            values(&elements),
+            [
+                ("Password".into(), None),
+                (String::new(), None),
+                (String::new(), None),
+                ("Sign in".into(), None),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_toplevel_view_is_refused_while_the_field_is_live() {
+        let mut typed = typed_in_tab();
+        assert_eq!(
+            typed.element_access("browser:1"),
+            ReadAccess::HideTypedFields
+        );
+        assert_eq!(typed.element_access("w7"), ReadAccess::Refused);
+        assert_eq!(typed.picture_access("browser:1"), ReadAccess::Refused);
+        assert_eq!(typed.picture_access("w7"), ReadAccess::Refused);
+        assert_eq!(typed.element_access("w8"), ReadAccess::Open);
+        typed.forget_window("browser:1");
+        assert_eq!(typed.element_access("w7"), ReadAccess::Open);
+        assert_eq!(typed.picture_access("w7"), ReadAccess::Open);
+    }
+
+    #[test]
+    fn a_field_typed_in_its_own_window_is_hidden_there() {
+        let mut typed = TypedFields::default();
+        typed.remember(TypedField {
+            view: "w3".into(),
+            toplevel: "w3".into(),
+            source_id: "/org/a11y/atspi/accessible/9".into(),
+            loader_id: None,
+        });
+        assert_eq!(typed.element_access("w3"), ReadAccess::HideTypedFields);
+        let mut elements = vec![element(
+            "/org/a11y/atspi/accessible/9",
+            "User",
+            Some("alice"),
+            2,
+            false,
+        )];
+        typed.hide_values("w3", &mut elements);
+        assert_eq!(values(&elements), [("User".into(), None)]);
     }
 }
